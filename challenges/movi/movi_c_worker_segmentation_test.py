@@ -168,6 +168,7 @@ num_objects = 2 #rng.randint(FLAGS.min_num_objects,
                  #         FLAGS.max_num_objects+1)
 logging.info("Placing %d objects:", num_objects)
 objs = []
+
 for i in range(num_objects):
   obj = gso.create(asset_id=rng.choice(active_split))
   assert isinstance(obj, kb.FileBasedObject)
@@ -179,6 +180,7 @@ for i in range(num_objects):
   # kb.move_until_no_overlap(obj, simulator, spawn_region=SPAWN_REGION, rng=rng)
   # initialize velocity randomly but biased towards center
   if i == 0:
+      # occluder
       obj.velocity = (0, 0, 0)
       obj.position = (0, 0, 0.5) #(obj.bounds[1][2] - obj.bounds[0][2])  / 2 * 1.1)# 0.01) #obj.scale[2] / 2)
       obj.static = True
@@ -218,7 +220,7 @@ obj1_x_vel = 0.1 * occluder_width
 obj1_y_vel = 0
 # import pdb
 # pdb.set_trace()
-for frame in range(10):
+for frame in range(FLAGS.frame_start, FLAGS.frame_end+1):
     # Manually set the locations of the cubes for each frame
     objs[0].position = (0 + occluder_vel * frame/10, 0, 0.5) #(frame * 0.1, 0, 0)  # Example: move cube1 along the x-axis
     objs[1].position = (obj_1_start_pos[0] + obj1_x_vel * frame/10,
