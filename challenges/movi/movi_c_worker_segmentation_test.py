@@ -42,10 +42,23 @@ parser = kb.ArgumentParser()
 parser.add_argument("--objects_split", choices=["train", "test"],
                     default="train")
 # Configuration for the objects of the scene
-parser.add_argument("--min_num_objects", type=int, default=3,
+parser.add_argument("--min_num_objects", type=int, default=2,
                     help="minimum number of objects")
-parser.add_argument("--max_num_objects", type=int, default=10,
-                    help="maximum number of objects")
+parser.add_argument("--max_num_objects", type=int, default=3,
+                    help="maximum number of objects") 
+
+# Params added for MADS
+parser.add_argument("--num_occluded", choice=[1, 2],
+                    help="Whether to use one or two occluded objects")
+parser.add_argument("--occluder_moves", action="store_true",
+                    help="whether the occluder should move") 
+parser.add_argument("--occluded_moves", action="store_true",
+                    help="whether the occluded object should move (if both occluder and occluded move, they share the same velocity)")
+parser.add_argument("--occluded_relatable", action="store_true", 
+                    help="only used with two occluded objects; whether or not their edges, when interpolated, meet behind the occluder. (Not implemented yet, not sure I'll be able to.)")
+parser.add_argument("--occluded_textured", action="store_true",
+                    help="whether the occluded object should have a texture (vs uniform color)")
+
 # Configuration for the floor and background
 parser.add_argument("--floor_friction", type=float, default=0.0)
 parser.add_argument("--floor_restitution", type=float, default=0.0)
@@ -137,6 +150,7 @@ if FLAGS.camera == "fixed_random":
   scene.camera.look_at((0, 0, 0))
   print("Camera position: ", scene.camera.position)
 elif FLAGS.camera == "linear_movement":
+  raise ValueError()
   camera_start, camera_end = get_linear_camera_motion_start_end(
       movement_speed=rng.uniform(low=0., high=FLAGS.max_camera_movement)
   )
@@ -164,21 +178,50 @@ else:
   active_split = test_split
 
 
-num_objects = 2 #rng.randint(FLAGS.min_num_objects,
+num_objects = FLAGS.num_occluded + 1 #rng.randint(FLAGS.min_num_objects,
                  #         FLAGS.max_num_objects+1)
 logging.info("Placing %d objects:", num_objects)
 objs = []
+occluder = None
+occluded = []
 
-for i in range(num_objects):
-  obj = gso.create(asset_id=rng.choice(active_split))
-  assert isinstance(obj, kb.FileBasedObject)
-  scale = 1 #rng.uniform(0.75, 3.0)
-  obj.scale = scale / np.max(obj.bounds[1] - obj.bounds[0])
-  obj.metadata["scale"] = scale
-  scene += obj
-  objs.append(obj)
+def create_object(condition=None):
   # kb.move_until_no_overlap(obj, simulator, spawn_region=SPAWN_REGION, rng=rng)
   # initialize velocity randomly but biased towards center
+  valid = False
+  for i in range(500):
+    obj = gso.create(asset_id=rng.choice(active_split))
+    assert isinstance(obj, kb.FileBasedObject)
+    scale = 1 #rng.uniform(0.75, 3.0)
+    obj.scale = scale / np.max(obj.bounds[1] - obj.bounds[0])
+    obj.metadata["scale"] = scale
+    scene += obj
+    # objs.append(obj)
+    if (condition is None or condition(obj)):
+      return obj
+    
+  raise ValueError("Could not sample a valid object after 500 attempts")
+
+
+
+def add_object_1():
+  obj = create_object()
+  # TODO
+  return obj
+
+def add_object_2(obj_1):
+  obj = create_object()
+
+def add_occluder(occluded: list):
+  obj = create_object()
+  
+
+# occluded.append(add_object_1())
+
+for i in range(2):
+  obj = create_object()
+  import pdb
+  pdb.set_trace()
   if i == 0:
       # occluder
       obj.velocity = (0, 0, 0)
@@ -199,11 +242,14 @@ for i in range(num_objects):
   # pdb.set_trace()
   # obj.mass = 0
   obj.friction = 0
-
-
+  
   logging.info("    Added %s at %s", obj.asset_id, obj.position)
   logging.info("    Position: %s, Velocity: %s", obj.position, obj.velocity)
 
+  # Create occluder
+occluder = create_object()
+
+  
 
 if FLAGS.save_state:
   logging.info("Saving the simulator state to '%s' prior to the simulation.",
