@@ -584,8 +584,15 @@ def main():
         # Update the scene for the current frame
         scene.frame_current = frame
 
+        # This stores the initial position etc before running the simulation
         animation, collisions = simulator.run(frame_start=frame,
                                               frame_end=frame+1)  # scene.frame_end+1)
+        # Todo: Use the following two commands for debugging; break into pdb, modify camera position, etc, and
+        # re-render
+        data_stack = renderer.render(frames=[frame], return_layers=("rgba",))
+        # Save to image files
+        kb.write_image_dict(data_stack, output_dir)
+
         print(f"Rendered frame {frame}")
 
     # import pdb
