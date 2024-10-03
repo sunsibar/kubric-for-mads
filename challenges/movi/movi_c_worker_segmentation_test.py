@@ -66,6 +66,30 @@ import numpy as np
 SPAWN_REGION = [(-5, -5, 1), (5, 5, 5)]
 VELOCITY_RANGE = [(-4., -4., 0.), (4., 4., 0.)]
 
+OCCLUDER_OCCLUDED_IDS = {
+    'Mattel_SKIP_BO_Card_Game': ['Central_Garden_Flower_Pot_Goo_425', 'BlueBlack_Nintendo_3DSXL', 'MY_MOOD_MEMO',
+                                 'Unmellow_Yellow_Tieks_Neon_Patent_Leather_Ballet_Flats',
+                                 ] ,
+    'MOSAIC': ['ASICS_GELBlur33_20_GS_BlackWhiteSafety_Orange'],
+    'Google_Cardboard_Original_package': ['Perricone_MD_OVM'],
+    'Weston_No_22_Cajun_Jerky_Tonic_12_fl_oz_nLj64ZnGwDh': ['Cole_Hardware_Hammer_Black'],
+    # 'ALPHABET_AZ_GRADIENT': ['Cole_Hardware_Dishtowel_Blue'],
+    'ALPHABET_AZ_GRADIENT_WQb1ufEycSj': ['Cole_Hardware_Dishtowel_Blue', 'Seagate_1TB_Backup_Plus_portable_drive_Blue',
+                                         ],
+    '2_of_Jenga_Classic_Game': ['Superman_Battle_of_Smallville'],
+    'Wilton_PreCut_Parchment_Sheets_10_x_15_24_sheets': ['SAMOA'],
+
+}
+
+OCCLUDER_IDS = ['Office_Depot_Dell_Series_11_Remanufactured_Ink_Cartridge_TriColor',
+                'Wilton_PreCut_Parchment_Sheets_10_x_15_24_sheets',
+                'Mattel_SKIP_BO_Card_Game',
+                ]
+OCCLUDED_IDS = ['Womens_Teva_Capistrano_Bootie_ldjRT9yZ5Ht',
+                'Olive_Kids_Butterfly_Garden_Munch_n_Lunch_Bag',
+                'ZigKick_Hoops'
+
+                ]
 
 def parse():
     # --- CLI arguments
@@ -113,7 +137,7 @@ def parse():
     parser.add_argument("--gso_assets", type=str,
                         default="gs://kubric-public/assets/GSO/GSO.json")
     parser.add_argument("--save_state", dest="save_state", action="store_true")
-    parser.set_defaults(save_state=False, frame_end=12, #24,
+    parser.set_defaults(save_state=False, frame_end=24, #24,
                         frame_rate=12,
                         resolution=256)
     return parser.parse_args()
@@ -225,18 +249,24 @@ def main():
     occluder = None
     occluded = []
 
-    def create_object(condition=None, ):
+    def create_object(condition=None, asset_id=None):
       # kb.move_until_no_overlap(obj, simulator, spawn_region=SPAWN_REGION, rng=rng)
       # initialize velocity randomly but biased towards center
       for i in range(500):
-        obj = gso.create(asset_id=rng.choice(active_split))
+        if asset_id is not None:
+            obj = gso.create(asset_id=asset_id)
+        else:
+            obj = gso.create(asset_id=rng.choice(active_split))
         assert isinstance(obj, kb.FileBasedObject)
         scale = 1 #rng.uniform(0.75, 3.0)
         obj.scale = scale / np.max(obj.bounds[1] - obj.bounds[0])
         obj.metadata["scale"] = scale
         # objs.append(obj)
         if (condition is None or condition(obj)):
+          print(f"Object created asset id: {obj.asset_id}")
           return obj
+        elif asset_id is not None:
+            raise ValueError(f"Object with assed_id {asset_id} did not fulfill the condition!")
 
       raise ValueError("Could not sample a valid object after 500 attempts")
 
@@ -258,8 +288,8 @@ def main():
     def condition_width_vs_height(obj):
         ''' Tests whether either width >> height or the other way around.
             Useful property for both occluders and occluded objs.'''
-        width = (obj.bounds[1][0] - obj.bounds[0][0])
-        height = (obj.bounds[1][2] - obj.bounds[0][2])
+        width = (obj.aabbox[1][0] - obj.aabbox[0][0])
+        height = (obj.aabbox[1][2] - obj.aabbox[0][2])
         if (width >= 3*height) or (height >= 3*width):
             return True
         return False
@@ -269,7 +299,7 @@ def main():
            multiplying the sides of its bounding box.
            Over 0.5: Seem to be mostly rectangular objects.
            Below 0.2 can still be pans etc that have small volume but do fill space.'''
-        return obj.metadata["volume"] > threshold * np.prod(obj.bounds[1] - obj.bounds[0])
+        return obj.metadata["volume"] > threshold * np.prod(obj.aabbox[1] - obj.aabbox[0])
 
     def condition_occludes_obj(obj, occluded_obj):
         return occludes_obj_in_one_direction(obj, occluded_obj)[0]
@@ -278,10 +308,10 @@ def main():
            Also returns the direction - 0 for x, 2 for z - in which the occluded object points out.'''
         # import pdb
         # pdb.set_trace()
-        width = (obj.bounds[1][0] - obj.bounds[0][0])
-        height = (obj.bounds[1][2] - obj.bounds[0][2])
-        occluded_width = (occluded_obj.bounds[1][0] - occluded_obj.bounds[0][0])
-        occluded_height = (occluded_obj.bounds[1][2] - occluded_obj.bounds[0][2])
+        width = (obj.aabbox[1][0] - obj.aabbox[0][0])
+        height = (obj.aabbox[1][2] - obj.aabbox[0][2])
+        occluded_width = (occluded_obj.aabbox[1][0] - occluded_obj.aabbox[0][0])
+        occluded_height = (occluded_obj.aabbox[1][2] - occluded_obj.aabbox[0][2])
         if (width > occluded_width) and (height > occluded_height):
             return False, -1
         elif (width > 1.5 * occluded_width) and ((width - occluded_width) > 0.1) and (height < 0.5 * occluded_height):
@@ -295,12 +325,12 @@ def main():
         return can_occlude_objects_in_one_direction(obj, occluded_1, occluded_2)[0]
     def can_occlude_objects_in_one_direction(obj, occluded_1, occluded_2):
         '''Test whether either in x or in z direction both objects fit behind the occluder in one direction.'''
-        width = (obj.bounds[1][0] - obj.bounds[0][0])
-        height = (obj.bounds[1][2] - obj.bounds[0][2])
-        occluded1_width = (occluded_1.bounds[1][0] - occluded_1.bounds[0][0])
-        occluded1_height = (occluded_1.bounds[1][2] - occluded_1.bounds[0][2])
-        occluded2_width = (occluded_2.bounds[1][0] - occluded_2.bounds[0][0])
-        occluded2_height = (occluded_2.bounds[1][2] - occluded_2.bounds[0][2])
+        width = (obj.aabbox[1][0] - obj.aabbox[0][0])
+        height = (obj.aabbox[1][2] - obj.aabbox[0][2])
+        occluded1_width = (occluded_1.aabbox[1][0] - occluded_1.aabbox[0][0])
+        occluded1_height = (occluded_1.aabbox[1][2] - occluded_1.aabbox[0][2])
+        occluded2_width = (occluded_2.aabbox[1][0] - occluded_2.aabbox[0][0])
+        occluded2_height = (occluded_2.aabbox[1][2] - occluded_2.aabbox[0][2])
         occluded_width = max(occluded1_width , occluded2_width)
         occluded_height = max(occluded1_height , occluded2_height)
         if (width > 1.5 * occluded_width):
@@ -338,6 +368,8 @@ def main():
 
     for i in range(FLAGS.num_occluded):
       obj = create_object(condition=(None))#None if FLAGS.num_occluded == 2 else condition_width_vs_height))
+      # import pdb
+      # pdb.set_trace()
       if not FLAGS.occluded_moves:
           obj.static = True
       scene += obj
@@ -358,31 +390,33 @@ def main():
         occluder = create_object(condition=lambda x: (condition_fills_space(x) and condition_width_vs_height(x)
                                                       and condition_occludes_two_objects(x, occluded[0], occluded[1])))
     # occluder.position = (0, 0, 0.5) #(obj.bounds[1][2] - obj.bounds[0][2])  / 2 * 1.1)# 0.01) #obj.scale[2] / 2)
+    scene += occluder
     if not FLAGS.occluder_moves:
         occluder.velocity = (0, 0, 0)
         # occluder.static = True
 
-    occluder_width = (occluder.bounds[1][0] - occluder.bounds[0][0]) # width in x-direction
-    occluder_height = (occluder.bounds[1][2] - occluder.bounds[0][2]) # height in z-direction
-    occluder_depth = (occluder.bounds[1][1] - occluder.bounds[0][1]) # depth in y-direction
+    occluder_width = (occluder.aabbox[1][0] - occluder.aabbox[0][0]) # width in x-direction
+    occluder_height = (occluder.aabbox[1][2] - occluder.aabbox[0][2]) # height in z-direction
+    occluder_depth = (occluder.aabbox[1][1] - occluder.aabbox[0][1]) # depth in y-direction
 
     assert FLAGS.movement_direction == "orthogonal", "Other direction not implemented yet!"
 
     # In case of one object, determine the direction of occlusion -> determine the movement direction, plus the velocity
     if FLAGS.num_occluded == 1:
-        occluded_width = (occluded[0].bounds[1][0] - occluded[0].bounds[0][0]) # width in x-direction
-        occluded_height = (occluded[0].bounds[1][2] - occluded[0].bounds[0][2]) # height in z-direction
-        occluded_depth = (occluded[0].bounds[1][1] - occluded[0].bounds[0][1])
+        occluded_width = (occluded[0].aabbox[1][0] - occluded[0].aabbox[0][0]) # width in x-direction
+        occluded_height = (occluded[0].aabbox[1][2] - occluded[0].aabbox[0][2]) # height in z-direction
+        occluded_depth = (occluded[0].aabbox[1][1] - occluded[0].aabbox[0][1])
         width_diff = (occluder_width - occluded_width)
         height_diff = (occluder_height - occluded_height)
+        logging.log(logging.INFO, f"Width difference: {width_diff}, Height difference: {height_diff}")
 
         occl, visible_direction = occludes_obj_in_one_direction(occluder, occluded[0])
         assert visible_direction != -1
         if visible_direction == 0:
             # Rotate both
             quat = np.array([np.cos(np.pi/4), 0, np.sin(np.pi/4), 0])
-            # occluded[0].quaternion = quat
-            # occluder.quaternion = quat
+            occluded[0].quaternion = quat
+            occluder.quaternion = quat
             occluded_width, occluded_height = occluded_height, occluded_width
             occluder_width, occluder_height = occluder_height, occluder_width
             width_diff, height_diff = height_diff, width_diff
@@ -441,12 +475,12 @@ def main():
     else:
         # Two objects.
         assert FLAGS.num_occluded == 2
-        occluded1_width = (occluded[0].bounds[1][0] - occluded[0].bounds[0][0])  # width in x-direction
-        occluded1_height = (occluded[0].bounds[1][2] - occluded[0].bounds[0][2])  # height in z-direction
-        occluded1_depth = (occluded[0].bounds[1][1] - occluded[0].bounds[0][1])  # depth in y-direction
-        occluded2_width = (occluded[1].bounds[1][0] - occluded[1].bounds[0][0])  # width in x-direction
-        occluded2_height = (occluded[1].bounds[1][2] - occluded[1].bounds[0][2])  # height in z-direction
-        occluded2_depth = (occluded[1].bounds[1][1] - occluded[1].bounds[0][1])
+        occluded1_width = (occluded[0].aabbox[1][0] - occluded[0].aabbox[0][0])  # width in x-direction
+        occluded1_height = (occluded[0].aabbox[1][2] - occluded[0].aabbox[0][2])  # height in z-direction
+        occluded1_depth = (occluded[0].aabbox[1][1] - occluded[0].aabbox[0][1])  # depth in y-direction
+        occluded2_width = (occluded[1].aabbox[1][0] - occluded[1].aabbox[0][0])  # width in x-direction
+        occluded2_height = (occluded[1].aabbox[1][2] - occluded[1].aabbox[0][2])  # height in z-direction
+        occluded2_depth = (occluded[1].aabbox[1][1] - occluded[1].aabbox[0][1])
 
         # Determine the direction in which the occluder can hide the two objects
         occludes, visible_direction = can_occlude_objects_in_one_direction(occluder, occluded[0], occluded[1])
@@ -454,9 +488,9 @@ def main():
         if visible_direction == 0:
             # Rotate both
             quat = np.array([np.cos(np.pi/4), 0, np.sin(np.pi/4), 0])
-            # occluded[0].quaternion = quat
-            # occluded[1].quaternion = quat
-            # occluder.quaternion = quat
+            occluded[0].quaternion = quat
+            occluded[1].quaternion = quat
+            occluder.quaternion = quat
             occluded1_width, occluded1_height = occluded1_height, occluded1_width
             occluded2_width, occluded2_height = occluded2_height, occluded2_width
             occluder_width, occluder_height = occluder_height, occluder_width
@@ -473,7 +507,7 @@ def main():
                     occluded[0].velocity = (dist_per_step, 0, 0)
                     occluded[1].position = (-0.40 * max_dist, 0, 0.5 + z1)
                     occluded[1].velocity = (dist_per_step, 0, 0)
-                    occluder.position = (0, (max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, 0.5)
+                    occluder.position = (0, -(max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, 0.5)
                     occluder.velocity = (0, 0, 0)
                 else:
                     assert FLAGS.occluder_moves
@@ -481,7 +515,7 @@ def main():
                     occluded[0].velocity = (0, 0, 0)
                     occluded[1].position = (0, 0, 0.5 + z1)
                     occluded[1].velocity = (0, 0, 0)
-                    occluder.position = (-0.4 * max_dist,  (max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, 0.5)
+                    occluder.position = (-0.4 * max_dist,  -(max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, 0.5)
                     occluder.velocity = (dist_per_step, 0, 0)
 
             elif (FLAGS.occluded_moves and FLAGS.occluder_moves):
@@ -489,7 +523,7 @@ def main():
                 dist_per_step = 0.8 * max_dist / (FLAGS.frame_end - FLAGS.frame_start) # for comparability to other setting, use width_diff
                 print(f"Distance travelled per step: {dist_per_step}")
                 start_ = -0.4 * max_dist
-                occluder.position = (start_, (max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, 0.5)
+                occluder.position = (start_, -(max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, 0.5)
                 occluded[0].position = (start_, 0, 0.5 + z0)
                 occluded[1].position = (start_, 0, 0.5 + z1)
                 occluder.velocity = (dist_per_step, 0, 0)
@@ -497,7 +531,7 @@ def main():
                 occluded[1].velocity = (dist_per_step, 0, 0)
             else:
                 # no movement, just place all centrally
-                occluder.position = (0,  (max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, 0.5)
+                occluder.position = (0,  -(max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, 0.5)
                 occluded[0].position = (0, 0, 0.5 + z0)
                 occluded[0].static = True
                 occluded[0].velocity = (0, 0, 0)
@@ -518,10 +552,10 @@ def main():
     objs = [occluder] + occluded
     for i, obj in enumerate(objs):
         # if i == 0:
-        #     quaternions[i] = obj.quaternion
+        quaternions[i] = obj.quaternion
         # else:
         #     quaternions[i] = (1,0,0,0) #obj.quaternion
-        velocities[i] = obj.velocity * 10 # for debugging
+        velocities[i] = obj.velocity #* 10 # for debugging
         start_positions[i] = obj.position
         logging.info("    Added %s at %s", obj.asset_id, obj.position)
         logging.info("    Position: %s, Velocity: %s", obj.position, obj.velocity)
@@ -530,13 +564,13 @@ def main():
       #     pass
       #     # occluder
       # elif i == 1:
-      #     occluder_width = (objs[0].bounds[1][0] - objs[0].bounds[0][0])
+      #     occluder_width = (objs[0].aabbox[1][0] - objs[0].aabbox[0][0])
       #     obj.velocity = (0.1 * occluder_width, 0, 0)
       #     obj_1_start_pos = (- occluder_width * 5 , #/ 2,
-      #                     (objs[0].bounds[1][1] - objs[0].bounds[0][1] + (obj.bounds[1][1] - obj.bounds[0][1])) / 2 * 1.02 ,#0.4,
+      #                     (objs[0].aabbox[1][1] - objs[0].aabbox[0][1] + (obj.aabbox[1][1] - obj.aabbox[0][1])) / 2 * 1.02 ,#0.4,
       #                     0.5)
       #     obj.position =  obj_1_start_pos # no gravity -> can levitate
-      #                     #(obj.bounds[1][2] - obj.bounds[0][2]) / 2 * 1.1)
+      #                     #(obj.aabbox[1][2] - obj.aabbox[0][2]) / 2 * 1.1)
       # else:
       #   obj.velocity = (rng.uniform(*VELOCITY_RANGE) -
       #                     [obj.position[0], obj.position[1], 0])
@@ -575,7 +609,7 @@ def main():
             obj.position = (start_positions[i][0] + velocities[i][0] * frame/n_frames,
                             start_positions[i][1] + velocities[i][1] * frame/n_frames,
                             start_positions[i][2] + velocities[i][2] * frame/n_frames)
-            # obj.quaternion = quaternions[i]
+            obj.quaternion = quaternions[i]
             ## objs[0].position = (0 + occluder_vel * frame/n_frames, 0, 0.5) #(frame * 0.1, 0, 0)  # Example: move cube1 along the x-axis
             ## objs[1].position = (obj_1_start_pos[0] + obj1_x_vel * frame/n_frames,
             ##                     obj_1_start_pos[1] + obj1_y_vel * frame/n_frames,
@@ -585,13 +619,14 @@ def main():
         scene.frame_current = frame
 
         # This stores the initial position etc before running the simulation
-        animation, collisions = simulator.run(frame_start=frame,
-                                              frame_end=frame+1)  # scene.frame_end+1)
+        animation, collisions = simulator.run(frame_start=frame, frame_end=frame+1)  # scene.frame_end+1)
         # Todo: Use the following two commands for debugging; break into pdb, modify camera position, etc, and
+        # import pdb
+        # pdb.set_trace()
         # re-render
-        data_stack = renderer.render(frames=[frame], return_layers=("rgba",))
-        # Save to image files
-        kb.write_image_dict(data_stack, output_dir)
+        # data_stack = renderer.render(frames=[frame], return_layers=("rgba",))
+        # # Save to image files
+        # kb.write_image_dict(data_stack, output_dir)
 
         print(f"Rendered frame {frame}")
 
@@ -625,6 +660,8 @@ def main():
 
     # Save to image files
     kb.write_image_dict(data_stack, output_dir)
+    import pdb
+    pdb.set_trace()
     kb.post_processing.compute_bboxes(data_stack["segmentation"],
                                       visible_foreground_assets)
 
