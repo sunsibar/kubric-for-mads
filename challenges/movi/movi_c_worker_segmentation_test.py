@@ -271,20 +271,6 @@ def main():
       raise ValueError("Could not sample a valid object after 500 attempts")
 
 
-
-    # def add_object_1():
-    #   obj = create_object()
-    #   # TODO
-    #   return obj
-    #
-    # def add_object_2(obj_1):
-    #   obj = create_object()
-    #
-    # def add_occluder(occluded: list):
-    #   obj = create_object()
-
-
-    # occluded.append(add_object_1())
     def condition_width_vs_height(obj):
         ''' Tests whether either width >> height or the other way around.
             Useful property for both occluders and occluded objs.'''
@@ -383,13 +369,29 @@ def main():
       # # if vol
 
     # Occluder
-    if FLAGS.num_occluded == 1:
-        occluder = create_object(condition=lambda x: (condition_fills_space(x) and condition_width_vs_height(x)
-                                                      and condition_occludes_obj(x, occluded[0])))
-    else:
-        occluder = create_object(condition=lambda x: (condition_fills_space(x) and condition_width_vs_height(x)
-                                                      and condition_occludes_two_objects(x, occluded[0], occluded[1])))
-    # occluder.position = (0, 0, 0.5) #(obj.bounds[1][2] - obj.bounds[0][2])  / 2 * 1.1)# 0.01) #obj.scale[2] / 2)
+    try:
+        if FLAGS.num_occluded == 1:
+            cond_ = lambda x: (condition_fills_space(x) and condition_width_vs_height(x)
+                                                          and condition_occludes_obj(x, occluded[0]))
+        else:
+            cond_ = lambda x: (condition_fills_space(x) and condition_width_vs_height(x)
+                                                   and condition_occludes_two_objects(x, occluded[0], occluded[1]))
+        occluder = create_object(condition=cond_)
+    except ValueError as e:
+        if FLAGS.num_occluded > 1:
+            raise e
+        asset_id = list(OCCLUDER_OCCLUDED_IDS.keys())[rng.choice(len(OCCLUDER_OCCLUDED_IDS))]
+        logging.warning(f"Could not sample a valid occluder object. Using asset_id {asset_id} instead.")
+        l = OCCLUDER_OCCLUDED_IDS[asset_id]
+        asset_id_occluded = l[rng.choice(len(l))]
+        scene.remove(occluded[0])
+        occluded[0] = create_object(asset_id=asset_id_occluded)
+        occluder = create_object(condition=cond_, asset_id=asset_id)
+        scene += occluded[0]
+        if not FLAGS.occluded_moves:
+            occluded[0].static = True
+
+        # occluder.position = (0, 0, 0.5) #(obj.bounds[1][2] - obj.bounds[0][2])  / 2 * 1.1)# 0.01) #obj.scale[2] / 2)
     scene += occluder
     if not FLAGS.occluder_moves:
         occluder.velocity = (0, 0, 0)
