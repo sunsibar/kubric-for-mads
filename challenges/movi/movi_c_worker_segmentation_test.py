@@ -47,7 +47,7 @@ Singularity command to connect to the container where you can run this:
 Then: cd /src/MADS/kubric/kubric-for-mads
 
 command to run this script inside the container:
-    /usr/bin/python3 -m pdb challenges/movi/movi_c_worker_segmentation_test.py  --camera=fixed_random
+    /usr/bin/python3 -m pdb challenges/movi/movi_c_worker_segmentation_test.py  --camera=fixed_random --occluded_moves
 
 
 """
@@ -78,6 +78,11 @@ OCCLUDER_OCCLUDED_IDS = {
                                          ],
     '2_of_Jenga_Classic_Game': ['Superman_Battle_of_Smallville'],
     'Wilton_PreCut_Parchment_Sheets_10_x_15_24_sheets': ['SAMOA'],
+
+    # below: fulfill aabbox conditions
+    'Mario_Luigi_Dream_Team_Nintendo_3DS_Game': ['Canon_Pixma_Ink_Cartridge_8_Green'],
+    'PEPSI_NEXT_CACRV': ['5_HTP', ],
+    'YumYum_D3_Liquid': ['Super_Mario_3D_World_Deluxe_Set'],
 
 }
 
@@ -204,14 +209,15 @@ def main():
     texture_node = dome_blender.data.materials[0].node_tree.nodes["Image Texture"]
     texture_node.image = bpy.data.images.load(background_hdri.filename)
 
+    H = 3 # camera height/height of "center" of the scene
     # Camera
     logging.info("Setting up the Camera...")
     scene.camera = kb.PerspectiveCamera(focal_length=35., sensor_width=32)
     if FLAGS.camera == "fixed_random":
-      scene.camera.position = (  0, -1.5, 0.5)
+      scene.camera.position = (  0, -1.5, H)
           # kb.sample_point_in_half_sphere_shell(
           # inner_radius=7., outer_radius=9., offset=0.1))
-      scene.camera.look_at((0, 0, 0.5))
+      scene.camera.look_at((0, 0, H))
       print("Camera position: ", scene.camera.position)
     elif FLAGS.camera == "linear_movement":
       # raise ValueError()
@@ -285,10 +291,11 @@ def main():
            multiplying the sides of its bounding box.
            Over 0.5: Seem to be mostly rectangular objects.
            Below 0.2 can still be pans etc that have small volume but do fill space.'''
-        return obj.metadata["volume"] > threshold * np.prod(obj.aabbox[1] - obj.aabbox[0])
+        return obj.metadata["volume"] > threshold * np.prod(obj.bounds[1] - obj.bounds[0])
 
     def condition_occludes_obj(obj, occluded_obj):
         return occludes_obj_in_one_direction(obj, occluded_obj)[0]
+    
     def occludes_obj_in_one_direction(obj, occluded_obj):
         '''check whether occluded_obj can point out nicely in one direction and is hidden in the other.
            Also returns the direction - 0 for x, 2 for z - in which the occluded object points out.'''
@@ -436,15 +443,15 @@ def main():
                 dist_per_step = 0.8 * max_dist / (FLAGS.frame_end - FLAGS.frame_start)
                 print(f"Distance travelled per step: {dist_per_step}")
                 if FLAGS.occluded_moves:
-                    occluded[0].position = (-0.40 * max_dist, 0, 0.5)
+                    occluded[0].position = (-0.40 * max_dist, 0, H)
                     occluded[0].velocity = (dist_per_step, 0, 0)
-                    occluder.position = (0, (occluded_depth + occluder_depth) * 0.55, 0.5)
+                    occluder.position = (0, -(occluded_depth + occluder_depth) * 0.55, H)
                     occluder.velocity = (0, 0, 0)
                 else:
                     assert FLAGS.occluder_moves
-                    occluded[0].position = (0, 0, 0.5)
+                    occluded[0].position = (0, 0, H)
                     occluded[0].velocity = (0, 0, 0)
-                    occluder.position = (-0.4 * max_dist,  (occluded_depth + occluder_depth) * 0.55, 0.5)
+                    occluder.position = (-0.4 * max_dist,  -(occluded_depth + occluder_depth) * 0.55, H)
                     occluder.velocity = (dist_per_step, 0, 0)
 
             elif (FLAGS.occluded_moves and FLAGS.occluder_moves):
@@ -452,14 +459,14 @@ def main():
                 dist_per_step = 0.8 * width_diff / (FLAGS.frame_end - FLAGS.frame_start) # for comparability to other setting, use width_diff
                 print(f"Distance travelled per step: {dist_per_step}")
                 start_ = -0.4 * width_diff
-                occluder.position = (start_, (occluded_depth + occluder_depth) * 0.55, 0.5)
-                occluded[0].position = (start_, 0, 0.5)
+                occluder.position = (start_, -(occluded_depth + occluder_depth) * 0.55, H)
+                occluded[0].position = (start_, 0, H)
                 occluder.velocity = (dist_per_step, 0, 0)
                 occluded[0].velocity = (dist_per_step, 0, 0)
             else:
                 # no movement, just place both centrally
-                occluder.position = (0,  (occluded_depth + occluder_depth) * 0.55, 0.5)
-                occluded[0].position = (0, 0, 0.5)
+                occluder.position = (0,  -(occluded_depth + occluder_depth) * 0.55, H)
+                occluded[0].position = (0, 0, H)
                 occluded[0].static = True
                 occluded[0].velocity = (0, 0, 0)
 
@@ -505,19 +512,19 @@ def main():
                 dist_per_step = 0.8 * max_dist / (FLAGS.frame_end - FLAGS.frame_start)
                 print(f"Distance travelled per step: {dist_per_step}")
                 if FLAGS.occluded_moves:
-                    occluded[0].position = (-0.40 * max_dist, 0, 0.5 + z0)
+                    occluded[0].position = (-0.40 * max_dist, 0, H + z0)
                     occluded[0].velocity = (dist_per_step, 0, 0)
-                    occluded[1].position = (-0.40 * max_dist, 0, 0.5 + z1)
+                    occluded[1].position = (-0.40 * max_dist, 0, H + z1)
                     occluded[1].velocity = (dist_per_step, 0, 0)
-                    occluder.position = (0, -(max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, 0.5)
+                    occluder.position = (0, -(max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, H)
                     occluder.velocity = (0, 0, 0)
                 else:
                     assert FLAGS.occluder_moves
-                    occluded[0].position = (0, 0, 0.5 + z0)
+                    occluded[0].position = (0, 0, H + z0)
                     occluded[0].velocity = (0, 0, 0)
-                    occluded[1].position = (0, 0, 0.5 + z1)
+                    occluded[1].position = (0, 0, H + z1)
                     occluded[1].velocity = (0, 0, 0)
-                    occluder.position = (-0.4 * max_dist,  -(max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, 0.5)
+                    occluder.position = (-0.4 * max_dist,  -(max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, H)
                     occluder.velocity = (dist_per_step, 0, 0)
 
             elif (FLAGS.occluded_moves and FLAGS.occluder_moves):
@@ -525,19 +532,19 @@ def main():
                 dist_per_step = 0.8 * max_dist / (FLAGS.frame_end - FLAGS.frame_start) # for comparability to other setting, use width_diff
                 print(f"Distance travelled per step: {dist_per_step}")
                 start_ = -0.4 * max_dist
-                occluder.position = (start_, -(max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, 0.5)
-                occluded[0].position = (start_, 0, 0.5 + z0)
-                occluded[1].position = (start_, 0, 0.5 + z1)
+                occluder.position = (start_, -(max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, H)
+                occluded[0].position = (start_, 0, H + z0)
+                occluded[1].position = (start_, 0, H + z1)
                 occluder.velocity = (dist_per_step, 0, 0)
                 occluded[0].velocity = (dist_per_step, 0, 0)
                 occluded[1].velocity = (dist_per_step, 0, 0)
             else:
                 # no movement, just place all centrally
-                occluder.position = (0,  -(max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, 0.5)
-                occluded[0].position = (0, 0, 0.5 + z0)
+                occluder.position = (0,  -(max(occluded1_depth, occluded2_depth) + occluder_depth) * 0.55, H)
+                occluded[0].position = (0, 0, H + z0)
                 occluded[0].static = True
                 occluded[0].velocity = (0, 0, 0)
-                occluded[1].position = (0, 0, 0.5 + z1)
+                occluded[1].position = (0, 0, H + z1)
                 occluded[1].static = True
                 occluded[1].velocity = (0, 0, 0)
 
@@ -608,9 +615,9 @@ def main():
         # Manually set the locations of each object
         print(f"Len objs: {len(objs)}")
         for i, obj in enumerate(objs):
-            obj.position = (start_positions[i][0] + velocities[i][0] * frame/n_frames,
-                            start_positions[i][1] + velocities[i][1] * frame/n_frames,
-                            start_positions[i][2] + velocities[i][2] * frame/n_frames)
+            obj.position = (start_positions[i][0] + velocities[i][0] * frame,
+                            start_positions[i][1] + velocities[i][1] * frame,
+                            start_positions[i][2] + velocities[i][2] * frame)
             obj.quaternion = quaternions[i]
             ## objs[0].position = (0 + occluder_vel * frame/n_frames, 0, 0.5) #(frame * 0.1, 0, 0)  # Example: move cube1 along the x-axis
             ## objs[1].position = (obj_1_start_pos[0] + obj1_x_vel * frame/n_frames,
